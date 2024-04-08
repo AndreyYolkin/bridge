@@ -3,7 +3,7 @@ import type VueRouter from 'vue-router'
 import type { Location, RawLocation, Route, NavigationFailure } from 'vue-router'
 import { sendRedirect } from 'h3'
 import { useRouter as useVueRouter, useRoute as useVueRoute } from 'vue-router/composables'
-import { hasProtocol, joinURL, parseURL } from 'ufo'
+import { hasProtocol, joinURL, parseURL, withQuery } from 'ufo'
 import { useNuxtApp, callWithNuxt, useRuntimeConfig } from '../nuxt'
 import { createError, showError } from './error'
 import type { NuxtError } from './error'
@@ -70,18 +70,53 @@ const isProcessingMiddleware = () => {
   return false
 }
 
+// Conditional types, either one or other
+type Without<T, U> = { [P in Exclude<keyof T, keyof U>]?: never }
+type XOR<T, U> = (T | U) extends Object ? (Without<T, U> & U) | (Without<U, T> & T) : T | U
+
+export type OpenWindowFeatures = {
+  popup?: boolean
+  noopener?: boolean
+  noreferrer?: boolean
+} & XOR<{width?: number}, {innerWidth?: number}>
+  & XOR<{height?: number}, {innerHeight?: number}>
+  & XOR<{left?: number}, {screenX?: number}>
+  & XOR<{top?: number}, {screenY?: number}>
+
+export type OpenOptions = {
+  target: '_blank' | '_parent' | '_self' | '_top' | (string & {})
+  windowFeatures?: OpenWindowFeatures
+}
+
 export interface NavigateToOptions {
   replace?: boolean
-  redirectCode?: number,
+  redirectCode?: number
   external?: boolean
+  open?: OpenOptions
 }
 
 export const navigateTo = (to: RawLocation | undefined | null, options?: NavigateToOptions): Promise<void | Route | NavigationFailure> | RawLocation | Route => {
   if (!to) {
     to = '/'
   }
-  const toPath = typeof to === 'string' ? to : (to.path || '/')
-  const isExternal = hasProtocol(toPath, true)
+
+  const toPath = typeof to === 'string' ? to : (withQuery((to as Route).path || '/', to.query || {}) + (to.hash || ''))
+
+  if (options?.open) {
+    if (import.meta.client) {
+      const { target = '_blank', windowFeatures = {} } = options.open
+
+      const features = Object.entries(windowFeatures)
+        .filter(([_, value]) => value !== undefined)
+        .map(([feature, value]) => `${feature.toLowerCase()}=${value}`)
+        .join(', ')
+
+      open(toPath, target, features)
+      return Promise.resolve()
+    }
+  }
+
+  const isExternal = hasProtocol(toPath, { acceptRelative: true })
   if (isExternal && !options?.external) {
     throw new Error('Navigating to external URL is not allowed by default. Use `nagivateTo (url, { external: true })`.')
   }
