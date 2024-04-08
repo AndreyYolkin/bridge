@@ -3,7 +3,7 @@ import type VueRouter from 'vue-router'
 import type { Location, RawLocation, Route, NavigationFailure } from 'vue-router'
 import { sendRedirect } from 'h3'
 import { useRouter as useVueRouter, useRoute as useVueRoute } from 'vue-router/composables'
-import { hasProtocol, joinURL, parseURL, withQuery } from 'ufo'
+import { hasProtocol, joinURL, parseURL, withQuery, isScriptProtocol } from 'ufo'
 import { useNuxtApp, callWithNuxt, useRuntimeConfig } from '../nuxt'
 import { createError, showError } from './error'
 import type { NuxtError } from './error'
@@ -99,7 +99,6 @@ export const navigateTo = (to: RawLocation | undefined | null, options?: Navigat
   if (!to) {
     to = '/'
   }
-
   const toPath = typeof to === 'string' ? to : (withQuery((to as Route).path || '/', to.query || {}) + (to.hash || ''))
 
   if (options?.open) {
@@ -116,13 +115,17 @@ export const navigateTo = (to: RawLocation | undefined | null, options?: Navigat
     }
   }
 
-  const isExternal = hasProtocol(toPath, { acceptRelative: true })
-  if (isExternal && !options?.external) {
-    throw new Error('Navigating to external URL is not allowed by default. Use `nagivateTo (url, { external: true })`.')
+  const isExternal = options?.external || hasProtocol(toPath, { acceptRelative: true })
+  if (isExternal) {
+    if (!options?.external) {
+      throw new Error('Navigating to an external URL is not allowed by default. Use `navigateTo(url, { external: true })`.')
+    }
+    const protocol = parseURL(toPath).protocol
+    if (protocol && isScriptProtocol(protocol)) {
+      throw new Error(`Cannot navigate to a URL with '${protocol}' protocol.`)
+    }
   }
-  if (isExternal && parseURL(toPath).protocol === 'script:') {
-    throw new Error('Cannot navigate to an URL with script protocol.')
-  }
+
   // Early redirect on client-side
   if (process.client && !isExternal && isProcessingMiddleware()) {
     return to
